@@ -183,7 +183,7 @@ ashita.events.register('packet_in', 'csc_packet_in', function (e)
         if (category ~= 7 and category ~= 11) then return; end
         local skill = bits(86, 32);
         if (category == 7) then
-            if (skill ~= 24931) then return; end -- 24931 = started (28787 = interrupted)
+            if (bits(86, 16) ~= 24931) then return; end -- 24931 = started (28787 = interrupted); upper 16 bits vary
             skill = bits(213, 17);               -- first target's first action param = the ability being readied
         end
         state.moves:append({ actor = bits(40, 32), skill = skill, ready = category == 7, time = os.time() });
