@@ -31,6 +31,7 @@ local state = T{
     storageTick = -100,
     events = T{},        -- learned-spell events since load: { spellId, zoneId, mob, time }
     lastMob = nil,       -- last mob we had targeted (for "learned from")
+    moves = T{},         -- recent monster TP moves seen in action packets: { actor, skill, ready, time }, last 20
     logs = T{},          -- raw 0x056 quest/mission log payloads by log type (hex)
     blueSpells = nil,    -- { {id, name}, ... } every Blue Magic spell the client knows about
     err = nil,
@@ -95,6 +96,7 @@ local function collect()
         data.target = { name = name, index = ti, id = tgt:GetServerId(0), hpp = ent:GetHPPercent(ti), mob = isMob };
         if (isMob) then state.lastMob = name; end
     end
+    data.engaged = ent:GetStatus(me) == 1;
 
     -- Learned Blue Magic (the same check blucheck uses), sent with names so the app can match custom spells.
     local known = {};
@@ -123,6 +125,7 @@ local function collect()
     end
     data.storage = state.storage;
     data.events  = state.events;
+    data.moves   = state.moves;
     data.logs    = state.logs;
     return data;
 end
@@ -170,6 +173,21 @@ ashita.events.register('packet_in', 'csc_packet_in', function (e)
                 state.storageTick = -100; -- force a fresh write soon
             end
         end
+        return;
+    end
+    -- 0x028 Action: monster TP moves ("readies" = category 7, "uses" = category 11), as shown in the chat log.
+    -- Bit layout as in HXUI's action parser: actor at bit 40, category at 82, action id at 86, first target at 150.
+    if (e.id == 0x0028) then
+        local bits = function (off, len) return ashita.bits.unpack_be(e.data_raw, 0, off, len); end
+        local category = bits(82, 4);
+        if (category ~= 7 and category ~= 11) then return; end
+        local skill = bits(86, 32);
+        if (category == 7) then
+            if (skill ~= 24931) then return; end -- 24931 = started (28787 = interrupted)
+            skill = bits(213, 17);               -- first target's first action param = the ability being readied
+        end
+        state.moves:append({ actor = bits(40, 32), skill = skill, ready = category == 7, time = os.time() });
+        while (#state.moves > 20) do table.remove(state.moves, 1); end
         return;
     end
     -- 0x056 Quest/Mission Log: keep the raw payload per log type; the app decodes it.
