@@ -1,0 +1,195 @@
+--[[
+* catseyecompanion - read-only bridge from the game client to the CatseyeXI Companion desktop app.
+*
+* Writes %APPDATA%\com.ffxi.catseyecompanion\live.json about once a second with what the client already knows:
+* position, target, jobs, learned and set Blue Magic, storage, and the raw quest/mission log packets.
+*
+* CatseyeXI addon policy tier T2 (Information): this addon only READS client memory and OBSERVES incoming packets.
+* It never sends packets, never queues commands, never writes game memory, and doesn't play the game.
+--]]
+
+addon.name    = 'catseyecompanion';
+addon.author  = 'CatseyeXI Companion';
+addon.version = '1.0';
+addon.desc    = 'Read-only data bridge for the CatseyeXI Companion app.';
+addon.link    = 'https://catseyexi.com/addon-policy';
+
+require('common');
+local json = require('json');
+local blu  = require('blu');
+
+local dir  = os.getenv('APPDATA') .. '\\com.ffxi.catseyecompanion';
+local file = dir .. '\\live.json';
+
+local STORAGES = { 0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }; -- see find.lua (3 = temporary: skipped)
+
+local state = T{
+    tick = 0,            -- os.clock() of the last write check
+    last = '',           -- last written body without the timestamp (to skip identical writes)
+    lastWrite = 0,
+    storage = nil,       -- { [container] = { {id, count}, ... } }, refreshed every 30s
+    storageTick = -100,
+    events = T{},        -- learned-spell events since load: { spellId, zoneId, mob, time }
+    lastMob = nil,       -- last mob we had targeted (for "learned from")
+    logs = T{},          -- raw 0x056 quest/mission log payloads by log type (hex)
+    blueSpells = nil,    -- { {id, name}, ... } every Blue Magic spell the client knows about
+    err = nil,
+};
+
+-- Every Blue Magic spell in the client's resources (skill 43), once.
+local function blue_spell_list()
+    if (state.blueSpells ~= nil) then return state.blueSpells; end
+    local list = T{};
+    local res = AshitaCore:GetResourceManager();
+    for id = 0, 1024 do
+        local s = res:GetSpellById(id);
+        if (s ~= nil and s.Skill == 43 and s.Name[1] ~= nil and s.Name[1] ~= '') then
+            list:append({ id = id, name = s.Name[1] });
+        end
+    end
+    state.blueSpells = list;
+    return list;
+end
+
+local function read_storage()
+    local inv = AshitaCore:GetMemoryManager():GetInventory();
+    local out = {};
+    for _, c in ipairs(STORAGES) do
+        local items = {};
+        for i = 0, inv:GetContainerCountMax(c) do
+            local e = inv:GetContainerItem(c, i);
+            if (e ~= nil and e.Id ~= 0 and e.Id ~= 65535) then
+                items[#items + 1] = { e.Id, e.Count };
+            end
+        end
+        out[tostring(c)] = items;
+    end
+    return out;
+end
+
+local function collect()
+    local mm     = AshitaCore:GetMemoryManager();
+    local party  = mm:GetParty();
+    local player = mm:GetPlayer();
+    local ent    = mm:GetEntity();
+    local me     = party:GetMemberTargetIndex(0);
+    if (me == 0 or party:GetMemberName(0) == nil or party:GetMemberName(0) == '') then
+        return nil; -- not in the world yet (title screen, zoning)
+    end
+
+    -- Ashita's X/Y are the ground plane and Z is height; export in LandSandBoat's convention (y = height).
+    local data = {
+        v       = 1,
+        char    = party:GetMemberName(0),
+        zone    = party:GetMemberZone(0),
+        pos     = { x = ent:GetLocalPositionX(me), y = ent:GetLocalPositionZ(me), z = ent:GetLocalPositionY(me) },
+        mainJob = player:GetMainJob(), mainLevel = player:GetMainJobLevel(),
+        subJob  = player:GetSubJob(),  subLevel  = player:GetSubJobLevel(),
+    };
+
+    local tgt = mm:GetTarget();
+    local ti  = tgt:GetTargetIndex(0);
+    if (ti ~= 0 and ti ~= me) then
+        local name = ent:GetName(ti);
+        local isMob = bit.band(ent:GetSpawnFlags(ti), 0x10) ~= 0;
+        data.target = { name = name, index = ti, id = tgt:GetServerId(0), hpp = ent:GetHPPercent(ti), mob = isMob };
+        if (isMob) then state.lastMob = name; end
+    end
+
+    -- Learned Blue Magic (the same check blucheck uses), sent with names so the app can match custom spells.
+    local known = {};
+    for _, s in ipairs(blue_spell_list()) do
+        if (player:HasSpell(s.id)) then known[#known + 1] = { s.id, s.name }; end
+    end
+    data.bluKnown = known;
+
+    -- Current set and points (only meaningful with BLU main or sub).
+    if (blu.is_blu_main() or blu.is_blu_sub()) then
+        local ok, set, spent, max = pcall(function ()
+            return blu.get_spells(), blu.get_spent_points(), blu.get_max_points();
+        end);
+        if (ok) then
+            local ids = {};
+            for _, v in ipairs(set) do if (v ~= 0) then ids[#ids + 1] = v + 512; end end
+            data.bluSet = ids;
+            data.bluPoints = { spent = spent, max = max };
+        end
+    end
+
+    if (os.clock() - state.storageTick >= 30 or state.storage == nil) then
+        state.storageTick = os.clock();
+        local ok, s = pcall(read_storage);
+        if (ok) then state.storage = s; end
+    end
+    data.storage = state.storage;
+    data.events  = state.events;
+    data.logs    = state.logs;
+    return data;
+end
+
+local function write(body)
+    ashita.fs.create_directory(dir);
+    local tmp = file .. '.tmp';
+    local f = io.open(tmp, 'w');
+    if (f == nil) then state.err = 'cannot write ' .. tmp; return; end
+    f:write(body);
+    f:close();
+    os.remove(file);
+    os.rename(tmp, file);
+    state.lastWrite = os.time();
+    state.err = nil;
+end
+
+ashita.events.register('d3d_present', 'csc_present', function ()
+    if (os.clock() - state.tick < 1.0) then return; end
+    state.tick = os.clock();
+    local ok, data = pcall(collect);
+    if (not ok) then state.err = tostring(data); return; end
+    if (data == nil) then return; end
+    local body = json.encode(data);
+    -- Write on change, plus a heartbeat every 5s so the app knows the addon is alive.
+    if (body ~= state.last or os.time() - state.lastWrite >= 5) then
+        state.last = body;
+        data.ts = os.time();
+        write(json.encode(data));
+    end
+end);
+
+-- Observe incoming packets only (never modified, never blocked).
+ashita.events.register('packet_in', 'csc_packet_in', function (e)
+    -- 0x029 Message Basic, message 419: "<player> learns <spell>!" (same check as blucheck).
+    if (e.id == 0x0029) then
+        local msg = struct.unpack('H', e.data, 0x18 + 0x01);
+        if (msg == 419) then
+            local spellId = struct.unpack('L', e.data, 0x0C + 0x01);
+            local sender  = struct.unpack('H', e.data, 0x14 + 0x01);
+            local me = AshitaCore:GetMemoryManager():GetParty():GetMemberTargetIndex(0);
+            if (sender == me) then
+                state.events:append({ spell = spellId, zone = AshitaCore:GetMemoryManager():GetParty():GetMemberZone(0),
+                                      mob = state.lastMob, time = os.time() });
+                state.storageTick = -100; -- force a fresh write soon
+            end
+        end
+        return;
+    end
+    -- 0x056 Quest/Mission Log: keep the raw payload per log type; the app decodes it.
+    if (e.id == 0x0056) then
+        local logType = struct.unpack('H', e.data, 0x24 + 0x01);
+        local bytes = {};
+        for i = 0x04, 0x23 do bytes[#bytes + 1] = string.format('%02x', e.data:byte(i + 1)); end
+        state.logs[tostring(logType)] = table.concat(bytes);
+        return;
+    end
+    -- Inventory finished loading / changed: refresh storage on the next write.
+    if (e.id == 0x001D or e.id == 0x0020) then
+        state.storageTick = -100;
+    end
+end);
+
+ashita.events.register('command', 'csc_command', function (e)
+    local args = e.command:args();
+    if (#args == 0 or (args[1] ~= '/csc' and args[1] ~= '/catseyecompanion')) then return; end
+    e.blocked = true;
+    print(string.format('[catseyecompanion] writing %s | last write %s | %s', file,
+        state.lastWrite > 0 and os.date('%H:%M:%S', state.lastWrite) or 'never', state.err or 'ok'));
+end);
