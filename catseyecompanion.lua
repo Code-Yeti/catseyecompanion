@@ -97,6 +97,12 @@ local function collect()
         if (isMob) then state.lastMob = name; end
     end
     data.engaged = ent:GetStatus(me) == 1;
+    -- Experience and limit/merit points (the same values the expbar addon reads).
+    data.exp = {
+        cur = player:GetExpCurrent(), need = player:GetExpNeeded(),
+        limit = player:GetLimitPoints(), merits = player:GetMeritPoints(), meritsMax = player:GetMeritPointsMax(),
+        limitMode = player:GetIsLimitModeEnabled() or player:GetIsExperiencePointsLocked(),
+    };
 
     -- Learned Blue Magic (the same check blucheck uses), sent with names so the app can match custom spells.
     local known = {};
