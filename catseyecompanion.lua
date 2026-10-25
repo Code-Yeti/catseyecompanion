@@ -31,6 +31,8 @@ local state = T{
     storageTick = -100,
     events = T{},        -- learned-spell events since load: { spellId, zoneId, mob, time }
     lastMob = nil,       -- last mob we had targeted (for "learned from")
+    ventureLog = T{},    -- chat lines about Ventures (plus the lines right after, for lists): { text, time }, last 60
+    ventureUntil = 0,    -- os.clock() until which following lines are kept too
     wsUsed = T{},        -- your recent weapon skills: { ws, target, sc (skillchain message or 0), time }, last 30
     moves = T{},         -- recent monster TP moves seen in action packets: { actor, skill, ready, time }, last 20
     logs = T{},          -- raw 0x056 quest/mission log payloads by log type (hex)
@@ -148,6 +150,7 @@ local function collect()
     data.events  = state.events;
     data.moves   = state.moves;
     data.wsUsed  = state.wsUsed;
+    data.ventureLog = state.ventureLog;
     data.logs    = state.logs;
     return data;
 end
@@ -232,6 +235,19 @@ ashita.events.register('packet_in', 'csc_packet_in', function (e)
     if (e.id == 0x001D or e.id == 0x0020) then
         state.storageTick = -100;
     end
+end);
+
+-- Observe chat text only (never modified or blocked): keep lines about Ventures, and those within 2s after one
+-- (the !ventures list spans several lines), so the app can show venture objectives and progress.
+ashita.events.register('text_in', 'csc_text_in', function (e)
+    local ok, text = pcall(function () return e.message:strip_colors():strip_translate(true); end);
+    if (not ok) then text = e.message; end
+    text = text:gsub('[%c]', ''):gsub('^%s+', '');
+    if (text == '') then return; end
+    if (text:lower():find('venture', 1, true)) then state.ventureUntil = os.clock() + 2;
+    elseif (os.clock() > state.ventureUntil) then return; end
+    state.ventureLog:append({ text = text, time = os.time() });
+    while (#state.ventureLog > 60) do table.remove(state.ventureLog, 1); end
 end);
 
 ashita.events.register('command', 'csc_command', function (e)
