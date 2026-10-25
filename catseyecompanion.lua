@@ -97,6 +97,20 @@ local function collect()
         if (isMob) then state.lastMob = name; end
     end
     data.engaged = ent:GetStatus(me) == 1;
+    -- Equipped main/sub/ranged weapons, with the weapon skill points a trial weapon has earned: the first two bytes of
+    -- the item's extdata (LandSandBoat Exdata::WeaponUnlock.UnlockPoints). Index lookup as equipmon does it.
+    local inv = mm:GetInventory();
+    local weapons = {};
+    for slot = 0, 2 do
+        local eq = inv:GetEquippedItem(slot);
+        if (eq ~= nil and eq.Index ~= 0) then
+            local it = inv:GetContainerItem(bit.band(eq.Index, 0xFF00) / 0x0100, eq.Index % 0x0100);
+            if (it ~= nil and it.Id ~= 0 and it.Id ~= 65535) then
+                weapons[#weapons + 1] = { slot = slot, id = it.Id, wsPoints = struct.unpack('H', it.Extra, 1) };
+            end
+        end
+    end
+    data.weapons = weapons;
     -- Experience and limit/merit points (the same values the expbar addon reads).
     data.exp = {
         cur = player:GetExpCurrent(), need = player:GetExpNeeded(),
