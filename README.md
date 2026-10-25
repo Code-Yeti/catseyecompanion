@@ -33,6 +33,7 @@ It should print nothing. The only `e.blocked` is the addon's own `/csc` chat com
 | Experience, limit and merit points | `GetPlayer()` (as `expbar` does) |
 | Engaged or not | `GetEntity():GetStatus()` |
 | Monster TP moves ("readies" / "uses", the same lines the chat log shows) | Incoming packet 0x028, categories 7 and 11 (observed only) |
+| Your own weapon skills and the skillchain they closed (as the chat log shows) | Incoming packet 0x028, category 3 (observed only) |
 | Quest and mission log | Incoming packet 0x056 payloads (observed only, stored as raw bytes) |
 
 ## What it writes

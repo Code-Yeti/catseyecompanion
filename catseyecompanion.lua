@@ -31,6 +31,7 @@ local state = T{
     storageTick = -100,
     events = T{},        -- learned-spell events since load: { spellId, zoneId, mob, time }
     lastMob = nil,       -- last mob we had targeted (for "learned from")
+    wsUsed = T{},        -- your recent weapon skills: { ws, target, sc (skillchain message or 0), time }, last 30
     moves = T{},         -- recent monster TP moves seen in action packets: { actor, skill, ready, time }, last 20
     logs = T{},          -- raw 0x056 quest/mission log payloads by log type (hex)
     blueSpells = nil,    -- { {id, name}, ... } every Blue Magic spell the client knows about
@@ -146,6 +147,7 @@ local function collect()
     data.storage = state.storage;
     data.events  = state.events;
     data.moves   = state.moves;
+    data.wsUsed  = state.wsUsed;
     data.logs    = state.logs;
     return data;
 end
@@ -200,6 +202,14 @@ ashita.events.register('packet_in', 'csc_packet_in', function (e)
     if (e.id == 0x0028) then
         local bits = function (off, len) return ashita.bits.unpack_be(e.data_raw, 0, off, len); end
         local category = bits(82, 4);
+        -- 3 = your own finished weapon skill (as in the chat log), with the skillchain it closed, if any: the first
+        -- target's first action has an "additional effect" whose message is the skillchain (bits 271, then 299).
+        if (category == 3 and bits(40, 32) == AshitaCore:GetMemoryManager():GetParty():GetMemberServerId(0)) then
+            local sc = bits(271, 1) == 1 and bits(299, 10) or 0;
+            state.wsUsed:append({ ws = bits(86, 16), target = bits(150, 32), sc = sc, time = os.time() });
+            while (#state.wsUsed > 30) do table.remove(state.wsUsed, 1); end
+            return;
+        end
         if (category ~= 7 and category ~= 11) then return; end
         local skill = bits(86, 32);
         if (category == 7) then
