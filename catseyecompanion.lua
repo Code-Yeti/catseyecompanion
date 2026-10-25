@@ -237,16 +237,21 @@ ashita.events.register('packet_in', 'csc_packet_in', function (e)
     end
 end);
 
--- Observe chat text only (never modified or blocked): keep lines about Ventures, and those within 2s after one
--- (the !ventures list spans several lines), so the app can show venture objectives and progress.
+-- Observe chat text only (never modified or blocked): keep lines about Ventures, and the server's reply to your own
+-- "!" commands (!ventures, !points, !wspoints...), i.e. lines within 2s after either. Each line keeps its chat mode
+-- so the app can tell the server's replies from battle messages.
 ashita.events.register('text_in', 'csc_text_in', function (e)
     local ok, text = pcall(function () return e.message:strip_colors():strip_translate(true); end);
     if (not ok) then text = e.message; end
     text = text:gsub('[%c]', ''):gsub('^%s+', '');
     if (text == '') then return; end
-    if (text:lower():find('venture', 1, true)) then state.ventureUntil = os.clock() + 2;
-    elseif (os.clock() > state.ventureUntil) then return; end
-    state.ventureLog:append({ text = text, time = os.time() });
+    local me = AshitaCore:GetMemoryManager():GetParty():GetMemberName(0) or '';
+    if (text:lower():find('venture', 1, true) or (me ~= '' and text:find(me .. ' : !', 1, true) == 1)) then
+        state.ventureUntil = os.clock() + 2;
+    elseif (os.clock() > state.ventureUntil) then
+        return;
+    end
+    state.ventureLog:append({ text = text, mode = bit.band(e.mode, 0xFF), time = os.time() });
     while (#state.ventureLog > 60) do table.remove(state.ventureLog, 1); end
 end);
 
