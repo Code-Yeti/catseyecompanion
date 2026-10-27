@@ -35,6 +35,7 @@ local state = T{
                          -- training/Records of Eminence progress: { text, mode, time, n }, last 100
     ventureUntil = 0,    -- os.clock() until which following lines are kept too
     lineNo = 0,          -- n: tells apart identical lines in the same second
+    lastKill = nil,      -- name of the last mob a "defeats" line named (regime lines carry it as mob)
     wsUsed = T{},        -- your recent weapon skills: { ws, target, sc (skillchain message or 0), time }, last 30
     moves = T{},         -- recent monster TP moves seen in action packets: { actor, skill, ready, time }, last 20
     logs = T{},          -- raw 0x056 quest/mission log payloads by log type (hex)
@@ -249,6 +250,10 @@ ashita.events.register('text_in', 'csc_text_in', function (e)
     if (text == '') then return; end
     local me = AshitaCore:GetMemoryManager():GetParty():GetMemberName(0) or '';
     local lower = text:lower();
+    -- The last mob defeated ("X defeats the Steelshell." / "The Steelshell falls to the ground."): a regime line doesn't
+    -- name its target, so it carries this along. Remembered only, not logged.
+    local killed = text:match('defeats (.-)%.$') or text:match('^(.-) falls to the ground');
+    if (killed) then state.lastKill = (killed:gsub('^[Tt]he ', '')); return; end
     -- Training progress lines: regimes ("designated target ... (Progress: 2/4)"), Records of Eminence (name, then a
     -- "Progress: 78/200." line) and other "(n/m)" counts.
     local training = lower:find('records of eminence', 1, true) or lower:find('designated target', 1, true)
@@ -259,7 +264,8 @@ ashita.events.register('text_in', 'csc_text_in', function (e)
         return;
     end
     state.lineNo = state.lineNo + 1;
-    state.ventureLog:append({ text = text, mode = bit.band(e.mode, 0xFF), time = os.time(), n = state.lineNo });
+    state.ventureLog:append({ text = text, mode = bit.band(e.mode, 0xFF), time = os.time(), n = state.lineNo,
+        mob = lower:find('designated target', 1, true) and state.lastKill or nil });
     while (#state.ventureLog > 100) do table.remove(state.ventureLog, 1); end
 end);
 
