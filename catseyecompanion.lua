@@ -35,6 +35,7 @@ local state = T{
                          -- training/Records of Eminence progress: { text, mode, time, n }, last 100
     ventureUntil = 0,    -- os.clock() until which following lines are kept too
     lineNo = 0,          -- n: tells apart identical lines in the same second
+    rewardUntil = 0,     -- os.clock() until which EXP/limit lines are kept (they follow a regime/RoE completion)
     lastKill = nil,      -- name of the last mob a "defeats" line named (regime lines carry it as mob)
     wsUsed = T{},        -- your recent weapon skills: { ws, target, sc (skillchain message or 0), time }, last 30
     moves = T{},         -- recent monster TP moves seen in action packets: { actor, skill, ready, time }, last 20
@@ -258,7 +259,11 @@ ashita.events.register('text_in', 'csc_text_in', function (e)
     -- "Progress: 78/200." line) and other "(n/m)" counts.
     local training = lower:find('records of eminence', 1, true) or lower:find('designated target', 1, true)
         or lower:find('regime', 1, true) or text:find('^Progress: %d+/%d+') or text:find('%(%d+/%d+%)');
-    if (lower:find('venture', 1, true) or (me ~= '' and text:find(me .. ' : !', 1, true) == 1)) then
+    -- A completion's reward ("Arcadea gains 600 experience points."): kept only within 2s after a completion line.
+    if (training and lower:find('completed', 1, true)) then state.rewardUntil = os.clock() + 2; end
+    local reward = os.clock() <= state.rewardUntil and (lower:find('experience points', 1, true) or lower:find('limit points', 1, true));
+    if (reward) then
+    elseif (lower:find('venture', 1, true) or (me ~= '' and text:find(me .. ' : !', 1, true) == 1)) then
         state.ventureUntil = os.clock() + 2;
     elseif (not training and os.clock() > state.ventureUntil) then
         return;
