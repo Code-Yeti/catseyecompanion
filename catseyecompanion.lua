@@ -31,8 +31,10 @@ local state = T{
     storageTick = -100,
     events = T{},        -- learned-spell events since load: { spellId, zoneId, mob, time }
     lastMob = nil,       -- last mob we had targeted (for "learned from")
-    ventureLog = T{},    -- chat lines about Ventures (plus the lines right after, for lists): { text, time }, last 60
+    ventureLog = T{},    -- tracked chat lines: Ventures (plus the lines right after, for lists), replies to your ! commands,
+                         -- training/Records of Eminence progress: { text, mode, time, n }, last 100
     ventureUntil = 0,    -- os.clock() until which following lines are kept too
+    lineNo = 0,          -- n: tells apart identical lines in the same second
     wsUsed = T{},        -- your recent weapon skills: { ws, target, sc (skillchain message or 0), time }, last 30
     moves = T{},         -- recent monster TP moves seen in action packets: { actor, skill, ready, time }, last 20
     logs = T{},          -- raw 0x056 quest/mission log payloads by log type (hex)
@@ -246,13 +248,19 @@ ashita.events.register('text_in', 'csc_text_in', function (e)
     text = text:gsub('[%c]', ''):gsub('^%s+', '');
     if (text == '') then return; end
     local me = AshitaCore:GetMemoryManager():GetParty():GetMemberName(0) or '';
-    if (text:lower():find('venture', 1, true) or (me ~= '' and text:find(me .. ' : !', 1, true) == 1)) then
+    local lower = text:lower();
+    -- Training progress lines: regimes ("designated target ... (Progress: 2/4)"), Records of Eminence (name, then a
+    -- "Progress: 78/200." line) and other "(n/m)" counts.
+    local training = lower:find('records of eminence', 1, true) or lower:find('designated target', 1, true)
+        or lower:find('regime', 1, true) or text:find('^Progress: %d+/%d+') or text:find('%(%d+/%d+%)');
+    if (lower:find('venture', 1, true) or (me ~= '' and text:find(me .. ' : !', 1, true) == 1)) then
         state.ventureUntil = os.clock() + 2;
-    elseif (os.clock() > state.ventureUntil) then
+    elseif (not training and os.clock() > state.ventureUntil) then
         return;
     end
-    state.ventureLog:append({ text = text, mode = bit.band(e.mode, 0xFF), time = os.time() });
-    while (#state.ventureLog > 60) do table.remove(state.ventureLog, 1); end
+    state.lineNo = state.lineNo + 1;
+    state.ventureLog:append({ text = text, mode = bit.band(e.mode, 0xFF), time = os.time(), n = state.lineNo });
+    while (#state.ventureLog > 100) do table.remove(state.ventureLog, 1); end
 end);
 
 ashita.events.register('command', 'csc_command', function (e)
