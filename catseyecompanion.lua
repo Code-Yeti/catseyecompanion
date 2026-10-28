@@ -131,6 +131,12 @@ local function collect()
         if (player:HasSpell(s.id)) then known[#known + 1] = { s.id, s.name }; end
     end
     data.bluKnown = known;
+    -- Trusts known (trust spells are client ids 896-1023).
+    local trusts = {};
+    for id = 896, 1023 do
+        if (player:HasSpell(id)) then trusts[#trusts + 1] = id; end
+    end
+    data.trustKnown = trusts;
 
     -- Current set and points (only meaningful with BLU main or sub).
     if (blu.is_blu_main() or blu.is_blu_sub()) then
