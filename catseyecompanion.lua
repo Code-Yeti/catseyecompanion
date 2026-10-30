@@ -40,6 +40,7 @@ local state = T{
     wsUsed = T{},        -- your recent weapon skills: { ws, target, sc (skillchain message or 0), time }, last 30
     moves = T{},         -- recent monster TP moves seen in action packets: { actor, skill, ready, time }, last 20
     logs = T{},          -- raw 0x056 quest/mission log payloads by log type (hex)
+    merits = nil,        -- { [merit id] = upgrades } from 0x08C (sent on every zone-in and after each upgrade)
     blueSpells = nil,    -- { {id, name}, ... } every Blue Magic spell the client knows about
     err = nil,
 };
@@ -162,6 +163,7 @@ local function collect()
     data.wsUsed  = state.wsUsed;
     data.ventureLog = state.ventureLog;
     data.logs    = state.logs;
+    data.merits  = state.merits;
     return data;
 end
 
@@ -239,6 +241,19 @@ ashita.events.register('packet_in', 'csc_packet_in', function (e)
         local bytes = {};
         for i = 0x04, 0x23 do bytes[#bytes + 1] = string.format('%02x', e.data:byte(i + 1)); end
         state.logs[tostring(logType)] = table.concat(bytes);
+        return;
+    end
+    -- 0x08C Merit Points: a count at 0x04, then { uint16 merit id, uint8 next cost, uint8 upgrades } entries from 0x08.
+    -- Keyed by id as a string so it encodes as a JSON object; ids of 0 are padding.
+    if (e.id == 0x008C) then
+        local count = struct.unpack('H', e.data, 0x04 + 0x01);
+        state.merits = state.merits or {};
+        for i = 0, count - 1 do
+            local off = 0x08 + i * 4;
+            if (off + 4 > #e.data) then break; end
+            local id = struct.unpack('H', e.data, off + 0x01);
+            if (id ~= 0) then state.merits[tostring(id)] = e.data:byte(off + 0x04); end
+        end
         return;
     end
     -- Inventory finished loading / changed: refresh storage on the next write.
