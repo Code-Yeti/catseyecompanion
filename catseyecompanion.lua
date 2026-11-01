@@ -119,6 +119,19 @@ local function collect()
         end
     end
     data.weapons = weapons;
+    -- Everything worn, as slot name -> client item name (for the app's "Equip Wearing" script button).
+    local res = AshitaCore:GetResourceManager();
+    local slots = { 'main', 'sub', 'range', 'ammo', 'head', 'body', 'hands', 'legs', 'feet', 'neck', 'waist', 'ear1', 'ear2', 'ring1', 'ring2', 'back' };
+    local equip = {};
+    for slot = 0, 15 do
+        local eq = inv:GetEquippedItem(slot);
+        if (eq ~= nil and eq.Index ~= 0) then
+            local it = inv:GetContainerItem(bit.band(eq.Index, 0xFF00) / 0x0100, eq.Index % 0x0100);
+            local r = it ~= nil and it.Id ~= 0 and it.Id ~= 65535 and res:GetItemById(it.Id);
+            if (r) then equip[slots[slot + 1]] = r.Name[1]; end
+        end
+    end
+    data.equip = equip;
     -- Experience and limit/merit points (the same values the expbar addon reads).
     data.exp = {
         cur = player:GetExpCurrent(), need = player:GetExpNeeded(),
@@ -138,6 +151,27 @@ local function collect()
         if (player:HasSpell(id)) then trusts[#trusts + 1] = id; end
     end
     data.trustKnown = trusts;
+    -- Names of every known spell, current job ability and weapon skill, for macro/script autocomplete in the app.
+    local spells, abilities, ws = {}, {}, {};
+    for id = 1, 1023 do
+        if (player:HasSpell(id)) then
+            local r = res:GetSpellById(id);
+            if (r ~= nil and r.Name[1] ~= '') then spells[#spells + 1] = r.Name[1]; end
+        end
+    end
+    for id = 1, 511 do
+        if (player:HasAbility(id + 512)) then
+            local r = res:GetAbilityById(id + 512);
+            if (r ~= nil and r.Name[1] ~= '') then abilities[#abilities + 1] = r.Name[1]; end
+        end
+    end
+    for id = 1, 255 do
+        if (player:HasWeaponSkill(id)) then
+            local r = res:GetAbilityById(id);
+            if (r ~= nil and r.Name[1] ~= '') then ws[#ws + 1] = r.Name[1]; end
+        end
+    end
+    data.known = { spells = spells, abilities = abilities, ws = ws };
 
     -- Current set and points (only meaningful with BLU main or sub).
     if (blu.is_blu_main() or blu.is_blu_sub()) then
