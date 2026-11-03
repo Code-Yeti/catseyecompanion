@@ -138,6 +138,21 @@ local function collect()
         limit = player:GetLimitPoints(), merits = player:GetMeritPoints(), meritsMax = player:GetMeritPointsMax(),
         limitMode = player:GetIsLimitModeEnabled() or player:GetIsExperiencePointsLocked(),
     };
+    -- Status effects on you: { id, name, expiry (unix time, 0 = no timer) }. Timers are in 1/60s since the Vana'diel
+    -- epoch, converted as statustimers does. Own pcall so a client without GetStatusTimers still writes everything else.
+    pcall(function ()
+        local ids, timers, buffs = player:GetBuffs(), player:GetStatusTimers(), {};
+        for i = 0, 31 do
+            local id = ids[i + 1];
+            if (id ~= nil and id >= 0 and id ~= 255) then
+                local left = timers[i + 1] - (os.time() - 0x3C307D70) * 60;
+                while (left < -2147483648) do left = left + 0xFFFFFFFF; end
+                left = math.ceil(left / 60);
+                buffs[#buffs + 1] = { id, res:GetString('buffs.names', id) or '', (left > 0 and left < 86400) and os.time() + left or 0 };
+            end
+        end
+        data.buffs = buffs;
+    end);
 
     -- Learned Blue Magic (the same check blucheck uses), sent with names so the app can match custom spells.
     local known = {};
