@@ -15,6 +15,7 @@ addon.desc    = 'Read-only data bridge for the CatseyeXI Companion app.';
 addon.link    = 'https://catseyexi.com/addon-policy';
 
 require('common');
+local ffi  = require('ffi');
 local json = require('json');
 local blu  = require('blu');
 
@@ -42,6 +43,7 @@ local state = T{
     logs = T{},          -- raw 0x056 quest/mission log payloads by log type (hex)
     merits = nil,        -- { [merit id] = upgrades } from 0x08C (sent on every zone-in and after each upgrade)
     blueSpells = nil,    -- { {id, name}, ... } every Blue Magic spell the client knows about
+    icons = T{},         -- status icon ids already saved (or tried) this run
     err = nil,
 };
 
@@ -74,6 +76,23 @@ local function read_storage()
         out[tostring(c)] = items;
     end
     return out;
+end
+
+-- A status effect's icon from the client's resources, saved once as icons\<id>.bmp for the app (the bitmap is an
+-- in-memory BMP file, as HXUI and statustimers load it). Tried once per id per addon run.
+local function save_icon(id)
+    if (state.icons[id]) then return; end
+    state.icons[id] = true;
+    local path = dir .. '\\icons\\' .. id .. '.bmp';
+    local f = io.open(path, 'rb');
+    if (f ~= nil) then f:close(); return; end
+    local icon = AshitaCore:GetResourceManager():GetStatusIconByIndex(id);
+    if (icon == nil or icon.ImageSize == 0) then return; end
+    local bytes = type(icon.Bitmap) == 'string' and icon.Bitmap:sub(1, icon.ImageSize)
+        or ffi.string(ffi.cast('const char*', icon.Bitmap), icon.ImageSize);
+    ashita.fs.create_directory(dir .. '\\icons');
+    f = io.open(path, 'wb');
+    if (f ~= nil) then f:write(bytes); f:close(); end
 end
 
 local function collect()
@@ -149,6 +168,7 @@ local function collect()
                 while (left < -2147483648) do left = left + 0xFFFFFFFF; end
                 left = math.ceil(left / 60);
                 buffs[#buffs + 1] = { id, res:GetString('buffs.names', id) or '', (left > 0 and left < 86400) and os.time() + left or 0 };
+                pcall(save_icon, id);
             end
         end
         data.buffs = buffs;

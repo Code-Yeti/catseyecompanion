@@ -32,6 +32,7 @@ It should print nothing. The only `e.blocked` is the addon's own `/csc` chat com
 | Equipped weapons, and a trial weapon's weapon skill points (the item's own data, which the client already holds) | `GetInventory():GetEquippedItem()`, `GetContainerItem()`, as `equipmon` does |
 | Experience, limit and merit points | `GetPlayer()` (as `expbar` does) |
 | Your status effects and their time left | `GetPlayer():GetBuffs()`, `GetStatusTimers()` (as `statustimers` does) |
+| Status effect icons, from the client's own resources | `GetResourceManager():GetStatusIconByIndex()` (as `statustimers` and HXUI do) |
 | Merits you have upgraded, as the merit menu shows them | Incoming packet 0x08C (observed only) |
 | Engaged or not | `GetEntity():GetStatus()` |
 | Monster TP moves ("readies" / "uses", the same lines the chat log shows) | Incoming packet 0x028, categories 7 and 11 (observed only) |
@@ -46,6 +47,8 @@ It writes one local file, about once a second while values change, with a heartb
 ```
 %APPDATA%\com.ffxi.catseyecompanion\live.json
 ```
+
+It also saves each status effect icon the first time that effect is on you, as `icons\<id>.bmp` in the same folder.
 
 It makes no network connections. The companion app reads this file.
 
